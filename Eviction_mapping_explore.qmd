@@ -27,6 +27,7 @@ library("urbnmapr")
 library("tigris")
 library("RSocrata")
 library("tidylog")
+library("here")
 ```
 
 ## Load Data
@@ -66,13 +67,16 @@ counties <- counties(
   st_transform(crs = 4326)
 ```
 
-## Lat & Long Map
+## Map: All Marshals 
 ```{r}
 # Convert evict_data df to sf 
 evict_data_sf <- evict_data |> 
   st_as_sf(
     coords = c("longitude", "latitude"),
     crs = 4326)
+
+color_palette <- colorFactor(palette = c("#7CFEF0", "#2A6041"),
+                             domain = unique(evict_data_sf$year))
 
 # Leaflet map
 leaflet() |> 
@@ -85,7 +89,6 @@ leaflet() |>
               weight = 2,
               color = "black",
               opacity = 1,
-              label = ~namelsad
               ) |> 
   # Tract layer 
   addPolygons(data = tracts,
@@ -94,14 +97,59 @@ leaflet() |>
               weight = 1,
               opacity = 0.5,
               fillOpacity = 0.3,
-              label = ~tractce
+              label = ~paste(namelsadco, ", tract #", tractce, sep = "")
               ) |> 
   # Add eviction points
   addCircleMarkers(data = evict_data_sf,
                    radius = 3,
-                   color = "red",
-                   label = ~marshal_last_name,
-                   popup = ~paste("Name: ", marshal_last_name))
+                   color = ~color_palette(year),
+                   label = ~paste(marshal_last_name, ", ", year, sep = "")
+                   ) |> 
+  # Add legend
+  addLegend("bottomright", 
+            pal = color_palette, 
+            values = unique(evict_data_sf$year), 
+            title = "Eviction Year",
+            opacity = 1)
   
+```
+## Map: Grossman only
+```{r}
+grossman_data_sf <- evict_data_sf |> 
+  filter(marshal_last_name == "Grossman")
+
+# Leaflet map
+leaflet() |> 
+  # Basemap layer
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  # County layer
+  addPolygons(data = counties,
+              fill = FALSE,
+              stroke = TRUE,
+              weight = 2,
+              color = "black",
+              opacity = 1,
+              ) |> 
+  # Tract layer 
+  addPolygons(data = tracts,
+              fillColor = "blue",
+              color = "black",
+              weight = 1,
+              opacity = 0.5,
+              fillOpacity = 0.3,
+              label = ~paste(namelsadco, ", tract #", tractce, sep = "")
+              ) |> 
+  # Add eviction points
+  addCircleMarkers(data = grossman_data_sf,
+                   radius = 3,
+                   color = ~color_palette(year),
+                   label = ~paste(marshal_last_name, ", ", year, sep = "")
+                   ) |> 
+  # Add legend
+  addLegend("bottomright", 
+            pal = color_palette, 
+            values = unique(grossman_data_sf$year), 
+            title = "Eviction Year",
+            opacity = 1)
 ```
 
