@@ -1,0 +1,107 @@
+---
+title: "Eviction Mapping: Exploratory Data Vizualization"
+author: "Noah Johnson"
+execute: 
+  warning: false
+format:
+  html:
+    embed-resources: true
+    self-contained-math: true
+    toc: true
+    toc-depth: 4
+    code-fold: true
+    code-summary: "Click to show Code"
+    code-tools: true
+editor: visual
+---
+
+## Packages 
+```{r}
+library("tidyverse")
+library("readxl")
+library("tidycensus")
+library("janitor")
+library("sf")
+library("leaflet")
+library("urbnmapr")
+library("tigris")
+library("RSocrata")
+library("tidylog")
+```
+
+## Load Data
+```{r}
+#| output: false
+
+# Eviction data
+evict_data_raw <- read.socrata(
+  "https://data.cityofnewyork.us/resource/6z8x-wfk4.json")
+
+evict_data <- evict_data_raw |> 
+  mutate(year = as.numeric(substr(executed_date, 1, 4))) |> 
+  filter(year >= 2022,
+         !is.na(latitude),
+         !is.na(longitude))
+  
+
+# Spatial data
+nyc_counties_fips_list <- c("005", "047", "061", "081", "085")
+
+tracts <- tracts(
+  state = "NY",
+  county = nyc_counties_fips_list,
+  cb = TRUE,
+  year = "2022"
+  ) |> 
+  janitor::clean_names() |> 
+  st_transform(crs = 4326)
+
+counties <- counties(
+  state = "NY",
+  cb = TRUE,
+  year = "2022"
+  ) |> 
+  janitor::clean_names() |> 
+  filter(countyfp %in% nyc_counties_fips_list) |> 
+  st_transform(crs = 4326)
+```
+
+## Lat & Long Map
+```{r}
+# Convert evict_data df to sf 
+evict_data_sf <- evict_data |> 
+  st_as_sf(
+    coords = c("longitude", "latitude"),
+    crs = 4326)
+
+# Leaflet map
+leaflet() |> 
+  # Basemap layer
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  # County layer
+  addPolygons(data = counties,
+              fill = FALSE,
+              stroke = TRUE,
+              weight = 2,
+              color = "black",
+              opacity = 1,
+              label = ~namelsad
+              ) |> 
+  # Tract layer 
+  addPolygons(data = tracts,
+              fillColor = "blue",
+              color = "black",
+              weight = 1,
+              opacity = 0.5,
+              fillOpacity = 0.3,
+              label = ~tractce
+              ) |> 
+  # Add eviction points
+  addCircleMarkers(data = evict_data_sf,
+                   radius = 3,
+                   color = "red",
+                   label = ~marshal_last_name,
+                   popup = ~paste("Name: ", marshal_last_name))
+  
+```
+
