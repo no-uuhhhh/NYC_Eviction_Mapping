@@ -1,0 +1,172 @@
+---
+title: "NYC 2025 Evictions by Rent Burden"
+execute:
+  warning: false
+  message: false
+  echo: false
+  cache: true
+knitr:
+  opts_chunk:
+    cache.path: "Data/NYC_2025_Evictions_LeafletMap_cache/"
+format:
+  html:
+    embed-resources: true
+    self-contained-math: true
+    page-layout: custom
+    margin-top: "0px"
+    margin-bottom: "0px"
+    margin-left: "0px"
+    margin-right: "0px"
+---
+
+```{=html}
+<style>
+  body, html {
+    margin: 0;
+    padding: 0;
+  }
+  #map-container {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+  #map-container .leaflet-container {
+    height: 100% !important;
+    width: 100% !important;
+  }
+</style>
+```
+
+```{r}
+#| label: packages
+#| cache: false
+
+library(tidyverse)
+library(tidycensus)
+library(janitor)
+library(sf)
+library(leaflet)
+library(tigris)
+library(RSocrata)
+library(here)
+library(htmltools)
+
+options(tigris_use_cache = TRUE)
+```
+
+```{r}
+#| label: evictions-2025
+#| cache: true
+
+evict_2025_raw <- read.socrata(
+  "https://data.cityofnewyork.us/resource/6z8x-wfk4.json?$where=executed_date >= '2025-01-01' AND executed_date < '2026-01-01'"
+)
+
+evict_2025 <- evict_2025_raw |>
+  filter(!is.na(latitude), !is.na(longitude)) |>
+  mutate(
+    latitude  = as.numeric(latitude),
+    longitude = as.numeric(longitude)
+  )
+```
+
+```{r}
+#| label: rent-burden-tracts
+#| cache: true
+
+nyc_county_names <- c("Bronx", "Kings", "New York", "Queens", "Richmond")
+
+rentburden_tracts <- get_acs(
+  geography = "tract",
+  table     = "B25070",
+  year      = 2023,
+  survey    = "acs5",
+  state     = "NY",
+  county    = nyc_county_names,
+  geometry  = TRUE,
+  output    = "wide"
+) |>
+  janitor::clean_names() |>
+  select(geoid, ends_with("e"), geometry) |>
+  mutate(
+    rent_burden = if_else(
+      (b25070_001e - b25070_011e) > 0,
+      (b25070_007e + b25070_008e + b25070_009e + b25070_010e) /
+        (b25070_001e - b25070_011e),
+      NA_real_
+    )
+  ) |>
+  select(geoid, rent_burden, geometry) |>
+  st_transform(crs = 4326)
+```
+
+```{r}
+#| label: county-boundaries
+#| cache: true
+
+nyc_counties_fips <- c("005", "047", "061", "081", "085")
+
+counties <- counties(state = "NY", cb = TRUE, year = 2022) |>
+  janitor::clean_names() |>
+  filter(countyfp %in% nyc_counties_fips) |>
+  st_transform(crs = 4326)
+```
+
+```{r}
+#| label: spatial-join
+#| cache: true
+#| dependson: c("evictions-2025", "rent-burden-tracts")
+
+evict_sf <- evict_2025 |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326)
+
+evict_sf <- st_join(
+  evict_sf,
+  rentburden_tracts |> select(geoid, rent_burden),
+  join = st_within
+)
+```
+
+```{r}
+#| label: map
+#| cache: false
+
+pal_rent_burden <- colorNumeric(
+  palette  = "YlOrRd",
+  domain   = range(evict_sf$rent_burden, na.rm = TRUE),
+  na.color = "#AAAAAA"
+)
+
+map <- leaflet(options = leafletOptions(zoomControl = TRUE)) |>
+  addProviderTiles(providers$CartoDB.Positron) |>
+  addCircleMarkers(
+    data        = evict_sf,
+    radius      = 2.5,
+    color       = ~pal_rent_burden(rent_burden),
+    fillColor   = ~pal_rent_burden(rent_burden),
+    fillOpacity = 0.8,
+    stroke      = FALSE,
+    label       = ~lapply(
+      paste0(
+        "<b>Eviction date:</b> ", format(as.Date(executed_date), "%B %d, %Y"), "<br>",
+        "<b>Tract rent burden:</b> ", scales::percent(rent_burden, accuracy = 1)
+      ),
+      htmltools::HTML
+    )
+  ) |>
+  addLegend(
+    position  = "bottomright",
+    pal       = pal_rent_burden,
+    values    = evict_sf$rent_burden,
+    title     = "Rent Burden<br><small>Percent of renters paying >30%<br>of income on rent (2023)</small>",
+    labFormat = labelFormat(
+      suffix    = "%",
+      transform = function(x) round(x * 100, 0)
+    ),
+    opacity   = 1
+  )
+
+div(id = "map-container", map)
+```
