@@ -159,7 +159,7 @@ map <- leaflet(options = leafletOptions(zoomControl = TRUE)) |>
   addLegend(
     position  = "bottomright",
     pal       = pal_rent_burden,
-    values    = evict_sf$rent_burden,
+    values    = evict_sf$rent_burden[!is.na(evict_sf$rent_burden)],
     title     = "Rent Burden<br><small>Percent of renters paying >30%<br>of income on rent (2023)</small>",
     labFormat = labelFormat(
       suffix    = "%",
